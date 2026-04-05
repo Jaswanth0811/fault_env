@@ -1,0 +1,32 @@
+name: "industrial-machine-fault-diagnosis"
+description: "Diagnose machine conditions based on sensor data and suggest actions."
+version: "1.0.0"
+
+observations:
+  temperature:
+    type: "float"
+    description: "Machine temperature reading"
+  vibration:
+    type: "float"
+    description: "Machine vibration level"
+  noise:
+    type: "float"
+    description: "Machine noise level"
+
+actions:
+  diagnosis:
+    type: "string"
+    enum: ["normal", "bearing_fault", "overheating"]
+    description: "Diagnosis of the machine condition"
+  action:
+    type: "string"
+    enum: ["no_action", "replace_bearing", "cool_system"]
+    description: "Suggested maintenance action"
+
+tasks:
+  easy:
+    description: "Determine if the machine is normal or has a fault."
+  medium:
+    description: "Determine the exact fault type of the machine."
+  hard:
+    description: "Diagnose the exact fault and prescribe the correct maintenance action."
