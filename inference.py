@@ -1,83 +1,80 @@
-import asyncio
 import os
-from typing import List
-
 import requests
+from openai import OpenAI
 
-API_BASE = os.getenv("API_BASE_URL", "http://localhost:7860")
-TASK_NAME = "fault_diagnosis"
-BENCHMARK = "fault_env"
-MODEL_NAME = os.getenv("MODEL_NAME", "local-test")
+# 🔑 Set your API key (or use environment variable)
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-MAX_STEPS = 1
-
-
-def log_start():
-    print(f"[START] task={TASK_NAME} env={BENCHMARK} model={MODEL_NAME}", flush=True)
+BASE = "http://localhost:7860"
 
 
-def log_step(step, action, reward, done):
-    print(
-        f"[STEP] step={step} action={action} reward={reward:.2f} done={str(done).lower()} error=null",
-        flush=True,
+def llm_agent(obs):
+    prompt = f"""
+You are an industrial machine expert.
+
+Sensor Data:
+Temperature: {obs['temperature']}
+Vibration: {obs['vibration']}
+Noise: {obs['noise']}
+
+Choose the best action in JSON format ONLY:
+
+{{
+  "action_type": "inspect or diagnose or repair",
+  "target": "motor or bearing or cooling or normal or bearing_fault or overheating",
+  "decision": "replace or monitor or ignore"
+}}
+"""
+
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "You are a machine fault diagnosis AI."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.2
     )
 
-
-def log_end(success, steps, score, rewards: List[float]):
-    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
-    print(
-        f"[END] success={str(success).lower()} steps={steps} score={score:.2f} rewards={rewards_str}",
-        flush=True,
-    )
-
-
-def simple_agent(obs):
-    # Simple rule-based logic
-    if obs["temperature"] > 90:
-        return {"diagnosis": "overheating", "action": "cool_system"}
-    elif obs["vibration"] > 0.7:
-        return {"diagnosis": "bearing_fault", "action": "replace_bearing"}
-    else:
-        return {"diagnosis": "normal", "action": "no_action"}
-
-
-async def main():
-    log_start()
-
-    rewards = []
-    steps = 0
+    content = response.choices[0].message.content
 
     try:
-        # RESET
-        res = requests.post(f"{API_BASE}/reset").json()
-        obs = res["observation"]
+        action = eval(content)  # simple parsing
+    except:
+        # fallback safe action
+        action = {
+            "action_type": "inspect",
+            "target": "motor",
+            "decision": "monitor"
+        }
 
-        for step in range(1, MAX_STEPS + 1):
-            action = simple_agent(obs)
-
-            res = requests.post(f"{API_BASE}/step", json=action).json()
-
-            reward = res.get("reward", 0.0)
-            done = res.get("done", True)
-
-            rewards.append(reward)
-            steps = step
-
-            log_step(step, action, reward, done)
-
-            if done:
-                break
-
-        score = max(0.0, min(1.0, sum(rewards)))
-        success = score > 0.5
-
-    except Exception as e:
-        print(f"[DEBUG] Error: {e}", flush=True)
-        score = 0.0
-        success = False
-
-    log_end(success, steps, score, rewards)
+    return action
 
 
-if __name__ == "__main__":
-    asyncio.run(main())
+print("[START] task=fault env=fault_env model=openai")
+
+res = requests.post(f"{BASE}/reset").json()
+obs = res["observation"]
+
+rewards = []
+
+for step in range(1, 6):
+    action = llm_agent(obs)
+
+    res = requests.post(f"{BASE}/step", json=action).json()
+
+    reward = res.get("reward", 0.0)
+    done = res.get("done", True)
+
+    rewards.append(reward)
+
+    print(f"[STEP] step={step} action={action} reward={reward:.2f} done={str(done).lower()} error=null")
+
+    if done:
+        break
+
+    obs = res["observation"]
+
+score = max(0.0, min(1.0, sum(rewards)))
+success = score > 0.5
+
+print(f"[END] success={str(success).lower()} steps={step} score={score:.2f} rewards={','.join(map(str,rewards))}")

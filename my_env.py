@@ -1,98 +1,117 @@
 import random
-import asyncio
-from typing import Dict, Any
-
 from models import Observation, Action, StepResult
+
 
 class FaultEnv:
     def __init__(self):
-        self._current_fault = "normal"
-        self._temp = 75.0
-        self._vib = 0.5
-        self._noise = 50.0
-        self._steps = 0
-        self._max_steps = 20
-        self._done = False
-        
-    async def reset(self) -> StepResult:
-        self._done = False
-        self._steps = 0
-        self._current_fault = random.choice(["normal", "bearing_fault", "overheating"])
-        
-        # Base healthy sensor values
-        self._temp = random.uniform(65.0, 80.0)
-        self._vib = random.uniform(0.2, 0.6)
-        self._noise = random.uniform(40.0, 60.0)
-            
-        current_obs = Observation(temperature=self._temp, vibration=self._vib, noise=self._noise)
-        
+        self.state_data = None
+        self.done = False
+        self.step_count = 0
+        self.max_steps = 5
+
+    async def reset(self):
+        self.state_data = {
+            "temperature": random.randint(60, 80),
+            "vibration": round(random.uniform(0.2, 0.6), 2),
+            "noise": random.randint(40, 70),
+            "fault": random.choice(["normal", "bearing_fault", "overheating"])
+        }
+
+        self.done = False
+        self.step_count = 0
+
         return StepResult(
-            observation=current_obs,
+            observation=self._get_observation(),
             reward=0.0,
-            done=self._done,
-            info={"fault_type": self._current_fault, "steps": self._steps}
+            done=False,
+            info={}
         )
-        
-    async def step(self, action: Action) -> StepResult:
-        if self._done:
+
+    def _get_observation(self):
+        # Safe partial observability
+        vib = self.state_data["vibration"]
+        if random.random() < 0.3:
+            vib = None
+
+        return Observation(
+            temperature=float(self.state_data["temperature"]),
+            vibration=vib,
+            noise=float(self.state_data["noise"])
+        )
+
+    async def step(self, action: Action):
+        if self.done:
             return StepResult(
-                observation=Observation(temperature=self._temp, vibration=self._vib, noise=self._noise),
+                observation=self._get_observation(),
                 reward=0.0,
                 done=True,
                 info={"error": "Episode already done"}
             )
-            
-        self._steps += 1
-        reward = 1.0  # +1 reward for every step survived in safe state
-        
-        # Physics Engine Simulation: Apply actions first
-        if action.action == "cool_system":
-            self._temp = max(60.0, self._temp - 15.0)
-            reward -= 0.1 # Slight penalty for using cooling energy
-        elif action.action == "replace_bearing":
-            self._vib = max(0.2, self._vib - 0.5)
-            self._noise = max(40.0, self._noise - 20.0)
-            reward -= 0.5 # Higher penalty for expensive downtime repairs
-            
-        # Simulate environment dynamics based on hidden fault
-        if self._current_fault == "overheating":
-            self._temp += random.uniform(5.0, 10.0)
-        elif self._current_fault == "bearing_fault":
-            self._vib += random.uniform(0.1, 0.3)
-            self._noise += random.uniform(5.0, 10.0)
-        
-        # Add natural noise to all sensors
-        self._temp += random.uniform(-1.0, 1.0)
-        self._vib += random.uniform(-0.05, 0.05)
-        self._noise += random.uniform(-2.0, 2.0)
-        
-        # Check critical thresholds (Machine Breakage)
-        broke = False
-        if self._temp > 120.0 or self._vib > 2.0 or self._noise > 100.0:
-            broke = True
-            reward = -10.0
-            
-        if broke or self._steps >= self._max_steps:
-            self._done = True
-            
-        current_obs = Observation(temperature=self._temp, vibration=self._vib, noise=self._noise)
-        
+
+        reward = 0.0
+        self.step_count += 1
+        fault = self.state_data["fault"]
+
+        # 🔥 SAFE dynamic updates
+        if fault == "overheating":
+            self.state_data["temperature"] += random.randint(1, 3)
+
+        elif fault == "bearing_fault":
+            self.state_data["vibration"] = round(
+                self.state_data["vibration"] + random.uniform(0.05, 0.1), 2
+            )
+
+        # 🟢 INSPECT
+        if action.action_type == "inspect":
+            reward += 0.1
+
+        # 🟡 DIAGNOSE
+        elif action.action_type == "diagnose":
+            if action.target == fault:
+                reward += 0.4
+            else:
+                reward -= 0.2
+
+        # 🔵 REPAIR
+        elif action.action_type == "repair":
+            correct_map = {
+                "normal": ("motor", "ignore"),
+                "bearing_fault": ("bearing", "replace"),
+                "overheating": ("cooling", "monitor")
+            }
+
+            correct_target, correct_decision = correct_map[fault]
+
+            if action.target == correct_target:
+                reward += 0.3
+            else:
+                reward -= 0.2
+
+            if action.decision == correct_decision:
+                reward += 0.3
+            else:
+                reward -= 0.2
+
+        # ⚡ Efficiency bonus
+        if self.step_count <= 2:
+            reward += 0.1
+
+        # 🛑 Ending conditions
+        if self.step_count >= self.max_steps:
+            self.done = True
+
+        if reward >= 0.8:
+            self.done = True
+
         return StepResult(
-            observation=current_obs,
+            observation=self._get_observation(),
             reward=reward,
-            done=self._done,
-            info={"broke": broke, "fault": self._current_fault, "steps": self._steps}
+            done=self.done,
+            info={"step_count": self.step_count}
         )
-        
-    async def state(self) -> Dict[str, Any]:
-        return {
-            "current_fault": self._current_fault,
-            "steps": self._steps,
-            "done": self._done,
-            "temperature": self._temp,
-            "vibration": self._vib,
-            "noise": self._noise
-        }
-        
+
+    async def state(self):
+        return self.state_data
+
     async def close(self):
         pass
