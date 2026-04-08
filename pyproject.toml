@@ -1,0 +1,17 @@
+[project]
+name = "fault-env"
+version = "0.1.0"
+description = "Advanced OpenEnv fault diagnosis environment"
+authors = [
+    { name = "Jaswanth" }
+]
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "pydantic",
+    "requests"
+]
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
